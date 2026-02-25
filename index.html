@@ -20,43 +20,66 @@
         window.posts = [];
         window.currentFont = 'Raleway';
 
-        // Export Firebase functions to window scope for global access
+        // Export Firebase functions to window scope
         window.addDoc = addDoc;
         window.collection = collection;
         window.serverTimestamp = serverTimestamp;
 
-        // Firebase Config
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'mirours-an-v2';
+        // Firebase Configuration Handling
+        let firebaseConfig;
+        try {
+            // Kiểm tra xem biến cấu hình có tồn tại không (dành cho môi trường sandbox)
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        } catch (e) {
+            console.error("Firebase config error:", e);
+        }
 
-        // Auth initialization (Rule 3)
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        };
+        // LƯU Ý: Nếu bạn chạy file này độc lập, bạn cần thay thế firebaseConfig bằng object cấu hình từ Firebase Console của bạn.
+        if (!firebaseConfig) {
+            console.warn("Cảnh báo: Không tìm thấy cấu hình Firebase. Tính năng đăng bài sẽ không hoạt động bên ngoài môi trường hệ thống này trừ khi bạn điền config thủ công.");
+            // Ví dụ: firebaseConfig = { apiKey: "...", authDomain: "...", ... };
+        }
 
-        // Data listener
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                const postsRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
-                onSnapshot(postsRef, (snapshot) => {
-                    window.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-                        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-                    if (window.currentTab === 'music') renderMusic();
-                }, (err) => console.error("Firestore error:", err));
-            }
-        });
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'mirours-an-default';
 
-        initAuth();
+            // Auth initialization (Rule 3)
+            const initAuth = async () => {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (err) {
+                    console.error("Auth error:", err);
+                }
+            };
 
-        window.db = db;
-        window.appId = appId;
+            // Data listener
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    const postsRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
+                    onSnapshot(postsRef, (snapshot) => {
+                        window.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                        if (window.currentTab === 'music') renderMusic();
+                    }, (err) => {
+                        console.error("Firestore error:", err);
+                    });
+                }
+            });
+
+            initAuth();
+            window.db = db;
+            window.appId = appId;
+            window.isFirebaseReady = true;
+        } else {
+            window.isFirebaseReady = false;
+        }
     </script>
 
     <style>
@@ -87,9 +110,20 @@
         }
         .float-card { transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .float-card:hover { transform: translateY(-10px); }
+        
+        /* Message Box Custom */
+        #status-msg {
+            position: fixed; bottom: 20px; right: 20px; padding: 15px 25px;
+            border-radius: 15px; background: white; color: #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); transform: translateY(150%);
+            transition: transform 0.3s ease; z-index: 1000;
+        }
+        #status-msg.show { transform: translateY(0); }
     </style>
 </head>
 <body>
+
+    <div id="status-msg"></div>
 
     <!-- Header Navigation -->
     <header class="fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-xl px-12 py-6 flex justify-between items-center soft-shadow">
@@ -143,10 +177,19 @@
     <script>
         let localFile = null;
 
+        function showMsg(text, isError = false) {
+            const msg = document.getElementById('status-msg');
+            msg.innerText = text;
+            msg.style.borderLeft = isError ? '4px solid #ef4444' : '4px solid #3b82f6';
+            msg.classList.add('show');
+            setTimeout(() => msg.classList.remove('show'), 3000);
+        }
+
         function switchTab(tab) {
             window.currentTab = tab;
             document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            document.getElementById(`tab-${tab}`).classList.add('active');
+            const tabEl = document.getElementById(`tab-${tab}`);
+            if(tabEl) tabEl.classList.add('active');
             
             const area = document.getElementById('content-area');
             area.style.opacity = '0';
@@ -166,7 +209,6 @@
                         <h2 class="text-5xl font-light tracking-tight leading-tight">Beyond the Sound,<br><span class="text-blue-600">The Soul of Mirours An</span></h2>
                         <p class="text-lg text-slate-500 font-light leading-relaxed italic">"Music is the shorthand of emotion." — Leo Tolstoy</p>
                     </section>
-
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
                         <div class="rounded-[40px] overflow-hidden soft-shadow">
                             <img src="https://images.unsplash.com/photo-1514525253361-bee8718a300a?auto=format&fit=crop&w=800" alt="Music Soul" class="w-full h-full object-cover">
@@ -178,34 +220,6 @@
                             </p>
                         </div>
                     </div>
-
-                    <section class="bg-white p-12 rounded-[50px] soft-shadow space-y-8">
-                        <h3 class="text-2xl font-normal text-center">Music and the Human Brain</h3>
-                        <div class="grid md:grid-cols-3 gap-8 text-center">
-                            <div class="p-6">
-                                <div class="text-blue-500 text-3xl mb-4">01</div>
-                                <h4 class="font-medium mb-2">Neuroplasticity</h4>
-                                <p class="text-xs text-slate-400 font-light leading-relaxed">Specific rhythmic patterns encourage the brain to form new neural pathways, aiding in cognitive recovery and creative thinking.</p>
-                            </div>
-                            <div class="p-6">
-                                <div class="text-blue-500 text-3xl mb-4">02</div>
-                                <h4 class="font-medium mb-2">Emotional Resonance</h4>
-                                <p class="text-xs text-slate-400 font-light leading-relaxed">Vibrations interact with our nervous system, naturally reducing cortisol levels and synchronizing heart rates to peaceful tempos.</p>
-                            </div>
-                            <div class="p-6">
-                                <div class="text-blue-500 text-3xl mb-4">03</div>
-                                <h4 class="font-medium mb-2">The Flow State</h4>
-                                <p class="text-xs text-slate-400 font-light leading-relaxed">Ambient soundscapes eliminate auditory distractions, allowing the mind to achieve peak concentration and effortlessly enter "the zone".</p>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="space-y-10">
-                        <h3 class="text-2xl font-normal">Our Vision</h3>
-                        <p class="text-slate-500 font-light leading-relaxed text-lg">
-                            We aim to become the most intimate archive of peace. By stripping away ads and complex algorithms, Mirours An preserves the purity of the HTML5 player. Our goal is simple: to provide a seamless bridge between your device and your soul, fostering a global community dedicated to mindfulness through shared sound.
-                        </p>
-                    </section>
                 </div>
             `;
         }
@@ -218,7 +232,7 @@
                         <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
                             <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
                         </div>
-                        <p class="text-slate-300 font-light">Kho lưu trữ chưa có bài đăng nào.</p>
+                        <p class="text-slate-300 font-light">Chưa có bản ghi nào được tìm thấy.</p>
                     </div>`;
                 return;
             }
@@ -237,12 +251,9 @@
                                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
                                     </div>
                                 </div>
-                                <div class="absolute top-4 right-4 px-3 py-1 bg-white/90 backdrop-blur-md rounded-full text-[9px] uppercase tracking-widest font-bold text-slate-500">
-                                    ${post.type}
-                                </div>
                             </div>
                             <h4 class="text-lg font-normal text-slate-700 truncate px-2">${post.title}</h4>
-                            <p class="text-[11px] text-slate-400 px-2 mt-1 uppercase tracking-widest font-light">Mirours Original • ${post.createdAt ? new Date(post.createdAt.seconds * 1000).toLocaleDateString() : 'Vừa xong'}</p>
+                            <p class="text-[11px] text-slate-400 px-2 mt-1 uppercase tracking-widest font-light">${post.type} • ${post.createdAt ? new Date(post.createdAt.seconds * 1000).toLocaleDateString() : 'Vừa xong'}</p>
                         </div>
                     `).join('')}
                 </div>
@@ -259,33 +270,23 @@
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
                                 Đăng bài mới
                             </button>
-                            <button class="w-full py-5 bg-slate-50 text-slate-400 rounded-[25px] cursor-not-allowed font-light">Báo cáo phân tích</button>
-                            <button class="w-full py-5 bg-slate-50 text-slate-400 rounded-[25px] cursor-not-allowed font-light">Danh sách yêu thích</button>
                         </div>
                     </div>
-
                     <div class="bg-white p-12 rounded-[50px] soft-shadow space-y-8">
-                        <h3 class="text-2xl font-light">Personalization</h3>
-                        <div class="space-y-6">
-                            <div>
-                                <label class="text-[11px] uppercase tracking-[0.2em] text-slate-400 mb-4 block">Chọn Phông chữ</label>
-                                <div class="flex gap-4">
-                                    <button onclick="changeFont('Raleway')" class="flex-1 py-4 border rounded-2xl transition-all font-light ${window.currentFont === 'Raleway' ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-100 text-slate-400'}">Raleway</button>
-                                    <button onclick="changeFont('Inter')" class="flex-1 py-4 border rounded-2xl transition-all font-light ${window.currentFont === 'Inter' ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-100 text-slate-400'}">Inter</button>
-                                </div>
-                            </div>
-                            <div class="pt-6 border-t border-slate-50 flex justify-between items-center">
-                                <p class="text-xs text-slate-400 font-light italic">Trạng thái: Online</p>
-                                <span class="w-2 h-2 bg-green-400 rounded-full"></span>
-                            </div>
-                        </div>
+                        <h3 class="text-2xl font-light">Ghi chú kỹ thuật</h3>
+                        <p class="text-sm text-slate-400 font-light leading-relaxed">
+                            Nếu bạn chạy ứng dụng này ngoài hệ thống Mirours, tính năng Firestore sẽ yêu cầu một API Key hợp lệ. Ảnh/Video được chọn sẽ được tạo URL tạm thời (Blob) để phát ngay lập tức.
+                        </p>
                     </div>
                 </div>
             `;
         }
 
-        // Functions
         window.toggleUpload = () => {
+            if(!window.isFirebaseReady) {
+                showMsg("Lỗi: Firebase chưa được cấu hình cho phiên bản này.", true);
+                return;
+            }
             document.getElementById('upload-modal').classList.toggle('hidden');
         };
 
@@ -303,17 +304,18 @@
             const btn = document.getElementById('btn-submit');
             
             if(!titleInput.value || !localFile) {
-                alert("Vui lòng nhập tên và chọn file nhạc/video!");
+                showMsg("Vui lòng nhập tên và chọn file!", true);
                 return;
             }
 
-            btn.innerText = "Đang đăng...";
+            btn.innerText = "Đang kết nối...";
             btn.disabled = true;
 
             const url = URL.createObjectURL(localFile);
             
             try {
-                // Ensure Firebase functions are called from window scope where they were exported
+                if (!window.db || !window.appId) throw new Error("Firebase configuration missing");
+
                 await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'posts'), {
                     title: titleInput.value,
                     type: typeInput.value,
@@ -321,18 +323,19 @@
                     createdAt: window.serverTimestamp()
                 });
                 
+                showMsg("Đăng bài thành công!");
                 toggleUpload();
+                
                 // Reset form
                 titleInput.value = '';
                 localFile = null;
                 document.getElementById('file-name-display').innerText = 'Chọn tệp từ thiết bị';
                 document.getElementById('file-name-display').classList.remove('text-blue-500');
                 
-                // Switch to Music tab to see result
                 switchTab('music');
             } catch (e) { 
                 console.error(e);
-                alert("Có lỗi khi đăng bài.");
+                showMsg("Lỗi đăng bài: Kiểm tra kết nối Firebase.", true);
             } finally {
                 btn.innerText = "Đăng bài";
                 btn.disabled = false;
@@ -341,24 +344,22 @@
 
         window.openCinema = (id) => {
             const post = window.posts.find(p => p.id === id);
+            if(!post) return;
+
             const container = document.getElementById('cinema-container');
             const content = document.getElementById('cinema-content');
             const title = document.getElementById('cinema-title');
 
-            if(!post) return;
-
             title.innerText = post.title;
             if(post.type === 'video') {
-                content.innerHTML = `<video id="active-video" controls autoplay class="w-full h-full"><source src="${post.url}"></video>`;
+                content.innerHTML = `<video controls autoplay class="w-full h-full rounded-[30px]"><source src="${post.url}"></video>`;
             } else {
                 content.innerHTML = `
-                    <div class="flex flex-col items-center justify-center h-full bg-slate-50 space-y-12 p-12">
-                        <div class="w-32 h-32 bg-blue-50 rounded-[40px] flex items-center justify-center text-blue-500 animate-pulse soft-shadow">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                    <div class="flex flex-col items-center justify-center h-full bg-slate-50 p-12 rounded-[30px]">
+                        <div class="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 mb-8">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
                         </div>
-                        <div class="audio-wave w-full max-w-xl soft-shadow">
-                            <audio id="active-audio" controls autoplay class="w-full"><source src="${post.url}"></audio>
-                        </div>
+                        <audio controls autoplay class="w-full max-w-md"><source src="${post.url}"></audio>
                     </div>
                 `;
             }
@@ -370,13 +371,6 @@
             document.getElementById('cinema-content').innerHTML = '';
         };
 
-        window.changeFont = (font) => {
-            window.currentFont = font;
-            document.body.style.fontFamily = font + ', sans-serif';
-            if(window.currentTab === 'studio') renderStudio();
-        };
-
-        // Init on load
         window.onload = () => switchTab('intro');
     </script>
 </body>
