@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIROURS AN MYFARE MUSIC</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link id="font-link" href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // Global state
+        window.currentTab = 'intro';
+        window.posts = [];
+        window.currentFont = 'Raleway';
+
+        // Export Firebase functions to window scope for global access
+        window.addDoc = addDoc;
+        window.collection = collection;
+        window.serverTimestamp = serverTimestamp;
+
+        // Firebase Config
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'mirours-an-v2';
+
+        // Auth initialization (Rule 3)
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        // Data listener
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                const postsRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
+                onSnapshot(postsRef, (snapshot) => {
+                    window.posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                    if (window.currentTab === 'music') renderMusic();
+                }, (err) => console.error("Firestore error:", err));
+            }
+        });
+
+        initAuth();
+
+        window.db = db;
+        window.appId = appId;
+    </script>
+
+    <style>
+        :root { --font-main: 'Raleway', sans-serif; }
+        body {
+            font-family: var(--font-main);
+            background-color: #fcfcfc;
+            color: #2d3748;
+            transition: opacity 0.4s ease;
+        }
+        .soft-shadow { box-shadow: 0 20px 50px rgba(0,0,0,0.04); }
+        .nav-link { position: relative; transition: all 0.3s; cursor: pointer; opacity: 0.5; }
+        .nav-link.active { opacity: 1; color: #3b82f6; }
+        .nav-link.active::after {
+            content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
+            width: 4px; height: 4px; background: #3b82f6; border-radius: 50%;
+        }
+        .cinema-mode {
+            position: fixed; inset: 0; z-index: 100; background: rgba(255,255,255,0.98);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 2rem; animation: fadeIn 0.4s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .no-border { border: none !important; outline: none !important; }
+        .audio-wave {
+            background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);
+            border-radius: 100px; padding: 1rem 2rem;
+        }
+        .float-card { transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .float-card:hover { transform: translateY(-10px); }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navigation -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-xl px-12 py-6 flex justify-between items-center soft-shadow">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-xl shadow-blue-200">M</div>
+            <h1 class="text-xl font-normal tracking-widest">MIROURS AN</h1>
+        </div>
+        <nav class="flex gap-12 text-sm uppercase tracking-[0.2em] font-medium">
+            <span onclick="switchTab('intro')" id="tab-intro" class="nav-link active">Giới thiệu</span>
+            <span onclick="switchTab('music')" id="tab-music" class="nav-link">Âm nhạc</span>
+            <span onclick="switchTab('studio')" id="tab-studio" class="nav-link">Studio của tôi</span>
+        </nav>
+    </header>
+
+    <main id="content-area" class="mt-32 max-w-7xl mx-auto px-8 pb-20 transition-opacity duration-300">
+        <!-- Content Area -->
+    </main>
+
+    <!-- Cinema Player -->
+    <div id="cinema-container" class="hidden cinema-mode">
+        <button onclick="closeCinema()" class="absolute top-8 right-12 text-slate-400 hover:text-black transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+        </button>
+        <div id="cinema-content" class="w-full max-w-5xl aspect-video rounded-[40px] overflow-hidden soft-shadow bg-black"></div>
+        <h2 id="cinema-title" class="mt-8 text-3xl font-light"></h2>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="upload-modal" class="fixed inset-0 z-[60] hidden flex items-center justify-center bg-white/80 backdrop-blur-md p-6">
+        <div class="bg-white w-full max-w-md rounded-[40px] p-10 soft-shadow animate-in slide-in-from-bottom-10 duration-500">
+            <h3 class="text-2xl font-light mb-8 text-center">Tải lên Studio</h3>
+            <div class="space-y-6">
+                <input type="text" id="post-title" placeholder="Tên tác phẩm..." class="w-full px-6 py-4 bg-slate-50 rounded-2xl no-border font-light">
+                <select id="post-type" class="w-full px-6 py-4 bg-slate-50 rounded-2xl no-border appearance-none font-light">
+                    <option value="video">Phim / Video</option>
+                    <option value="audio">Âm thanh / Nhạc</option>
+                </select>
+                <div class="bg-slate-50 p-8 rounded-2xl text-center cursor-pointer hover:bg-slate-100 transition-all" onclick="document.getElementById('file-input').click()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" class="mx-auto mb-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+                    <p id="file-name-display" class="text-sm text-slate-400 font-light">Chọn tệp từ thiết bị</p>
+                    <input type="file" id="file-input" class="hidden" accept="video/*,audio/*" onchange="handleFile(this)">
+                </div>
+                <div class="flex gap-4 pt-4">
+                    <button onclick="toggleUpload()" class="flex-1 py-4 text-slate-400 font-light">Hủy</button>
+                    <button id="btn-submit" onclick="savePost()" class="flex-[2] bg-blue-600 text-white py-4 rounded-2xl shadow-lg shadow-blue-100 font-light">Đăng bài</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let localFile = null;
+
+        function switchTab(tab) {
+            window.currentTab = tab;
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            
+            const area = document.getElementById('content-area');
+            area.style.opacity = '0';
+            
+            setTimeout(() => {
+                if(tab === 'intro') renderIntro();
+                if(tab === 'music') renderMusic();
+                if(tab === 'studio') renderStudio();
+                area.style.opacity = '1';
+            }, 300);
+        }
+
+        function renderIntro() {
+            document.getElementById('content-area').innerHTML = `
+                <div class="max-w-4xl mx-auto space-y-20 animate-in fade-in duration-700">
+                    <section class="text-center space-y-6">
+                        <h2 class="text-5xl font-light tracking-tight leading-tight">Beyond the Sound,<br><span class="text-blue-600">The Soul of Mirours An</span></h2>
+                        <p class="text-lg text-slate-500 font-light leading-relaxed italic">"Music is the shorthand of emotion." — Leo Tolstoy</p>
+                    </section>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+                        <div class="rounded-[40px] overflow-hidden soft-shadow">
+                            <img src="https://images.unsplash.com/photo-1514525253361-bee8718a300a?auto=format&fit=crop&w=800" alt="Music Soul" class="w-full h-full object-cover">
+                        </div>
+                        <div class="space-y-6">
+                            <h3 class="text-2xl font-normal">The Philosophy</h3>
+                            <p class="text-slate-500 font-light leading-relaxed">
+                                Mirours An is a sanctuary for the modern mind. In a world of noise, we believe in the clarity of frequency. Our platform serves as a digital mirror, reflecting the tranquility already present within you through the power of high-fidelity auditory experiences.
+                            </p>
+                        </div>
+                    </div>
+
+                    <section class="bg-white p-12 rounded-[50px] soft-shadow space-y-8">
+                        <h3 class="text-2xl font-normal text-center">Music and the Human Brain</h3>
+                        <div class="grid md:grid-cols-3 gap-8 text-center">
+                            <div class="p-6">
+                                <div class="text-blue-500 text-3xl mb-4">01</div>
+                                <h4 class="font-medium mb-2">Neuroplasticity</h4>
+                                <p class="text-xs text-slate-400 font-light leading-relaxed">Specific rhythmic patterns encourage the brain to form new neural pathways, aiding in cognitive recovery and creative thinking.</p>
+                            </div>
+                            <div class="p-6">
+                                <div class="text-blue-500 text-3xl mb-4">02</div>
+                                <h4 class="font-medium mb-2">Emotional Resonance</h4>
+                                <p class="text-xs text-slate-400 font-light leading-relaxed">Vibrations interact with our nervous system, naturally reducing cortisol levels and synchronizing heart rates to peaceful tempos.</p>
+                            </div>
+                            <div class="p-6">
+                                <div class="text-blue-500 text-3xl mb-4">03</div>
+                                <h4 class="font-medium mb-2">The Flow State</h4>
+                                <p class="text-xs text-slate-400 font-light leading-relaxed">Ambient soundscapes eliminate auditory distractions, allowing the mind to achieve peak concentration and effortlessly enter "the zone".</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="space-y-10">
+                        <h3 class="text-2xl font-normal">Our Vision</h3>
+                        <p class="text-slate-500 font-light leading-relaxed text-lg">
+                            We aim to become the most intimate archive of peace. By stripping away ads and complex algorithms, Mirours An preserves the purity of the HTML5 player. Our goal is simple: to provide a seamless bridge between your device and your soul, fostering a global community dedicated to mindfulness through shared sound.
+                        </p>
+                    </section>
+                </div>
+            `;
+        }
+
+        function renderMusic() {
+            const area = document.getElementById('content-area');
+            if (!window.posts || window.posts.length === 0) {
+                area.innerHTML = `
+                    <div class="text-center py-40">
+                        <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                        </div>
+                        <p class="text-slate-300 font-light">Kho lưu trữ chưa có bài đăng nào.</p>
+                    </div>`;
+                return;
+            }
+
+            area.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12 animate-in fade-in">
+                    ${window.posts.map(post => `
+                        <div class="group cursor-pointer" onclick="openCinema('${post.id}')">
+                            <div class="relative aspect-video bg-slate-100 rounded-[35px] overflow-hidden soft-shadow float-card mb-6 flex items-center justify-center">
+                                ${post.type === 'video' 
+                                    ? `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1" class="opacity-20"><path d="m22 8-6 4 6 4V8Z"></path><rect width="14" height="12" x="2" y="6" rx="2" ry="2"></rect></svg>`
+                                    : `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1" class="opacity-20"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`
+                                }
+                                <div class="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/5 transition-all flex items-center justify-center">
+                                    <div class="w-14 h-14 bg-white rounded-full flex items-center justify-center text-blue-600 shadow-xl opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+                                    </div>
+                                </div>
+                                <div class="absolute top-4 right-4 px-3 py-1 bg-white/90 backdrop-blur-md rounded-full text-[9px] uppercase tracking-widest font-bold text-slate-500">
+                                    ${post.type}
+                                </div>
+                            </div>
+                            <h4 class="text-lg font-normal text-slate-700 truncate px-2">${post.title}</h4>
+                            <p class="text-[11px] text-slate-400 px-2 mt-1 uppercase tracking-widest font-light">Mirours Original • ${post.createdAt ? new Date(post.createdAt.seconds * 1000).toLocaleDateString() : 'Vừa xong'}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderStudio() {
+            document.getElementById('content-area').innerHTML = `
+                <div class="grid md:grid-cols-2 gap-12 items-start animate-in fade-in">
+                    <div class="bg-white p-12 rounded-[50px] soft-shadow space-y-8">
+                        <h3 class="text-2xl font-light">Creative Studio</h3>
+                        <div class="space-y-4">
+                            <button onclick="toggleUpload()" class="w-full py-5 bg-blue-600 text-white rounded-[25px] flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-blue-100">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+                                Đăng bài mới
+                            </button>
+                            <button class="w-full py-5 bg-slate-50 text-slate-400 rounded-[25px] cursor-not-allowed font-light">Báo cáo phân tích</button>
+                            <button class="w-full py-5 bg-slate-50 text-slate-400 rounded-[25px] cursor-not-allowed font-light">Danh sách yêu thích</button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-12 rounded-[50px] soft-shadow space-y-8">
+                        <h3 class="text-2xl font-light">Personalization</h3>
+                        <div class="space-y-6">
+                            <div>
+                                <label class="text-[11px] uppercase tracking-[0.2em] text-slate-400 mb-4 block">Chọn Phông chữ</label>
+                                <div class="flex gap-4">
+                                    <button onclick="changeFont('Raleway')" class="flex-1 py-4 border rounded-2xl transition-all font-light ${window.currentFont === 'Raleway' ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-100 text-slate-400'}">Raleway</button>
+                                    <button onclick="changeFont('Inter')" class="flex-1 py-4 border rounded-2xl transition-all font-light ${window.currentFont === 'Inter' ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-100 text-slate-400'}">Inter</button>
+                                </div>
+                            </div>
+                            <div class="pt-6 border-t border-slate-50 flex justify-between items-center">
+                                <p class="text-xs text-slate-400 font-light italic">Trạng thái: Online</p>
+                                <span class="w-2 h-2 bg-green-400 rounded-full"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Functions
+        window.toggleUpload = () => {
+            document.getElementById('upload-modal').classList.toggle('hidden');
+        };
+
+        window.handleFile = (input) => {
+            if(input.files[0]) {
+                localFile = input.files[0];
+                document.getElementById('file-name-display').innerText = localFile.name;
+                document.getElementById('file-name-display').classList.add('text-blue-500');
+            }
+        };
+
+        window.savePost = async () => {
+            const titleInput = document.getElementById('post-title');
+            const typeInput = document.getElementById('post-type');
+            const btn = document.getElementById('btn-submit');
+            
+            if(!titleInput.value || !localFile) {
+                alert("Vui lòng nhập tên và chọn file nhạc/video!");
+                return;
+            }
+
+            btn.innerText = "Đang đăng...";
+            btn.disabled = true;
+
+            const url = URL.createObjectURL(localFile);
+            
+            try {
+                // Ensure Firebase functions are called from window scope where they were exported
+                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'posts'), {
+                    title: titleInput.value,
+                    type: typeInput.value,
+                    url: url,
+                    createdAt: window.serverTimestamp()
+                });
+                
+                toggleUpload();
+                // Reset form
+                titleInput.value = '';
+                localFile = null;
+                document.getElementById('file-name-display').innerText = 'Chọn tệp từ thiết bị';
+                document.getElementById('file-name-display').classList.remove('text-blue-500');
+                
+                // Switch to Music tab to see result
+                switchTab('music');
+            } catch (e) { 
+                console.error(e);
+                alert("Có lỗi khi đăng bài.");
+            } finally {
+                btn.innerText = "Đăng bài";
+                btn.disabled = false;
+            }
+        };
+
+        window.openCinema = (id) => {
+            const post = window.posts.find(p => p.id === id);
+            const container = document.getElementById('cinema-container');
+            const content = document.getElementById('cinema-content');
+            const title = document.getElementById('cinema-title');
+
+            if(!post) return;
+
+            title.innerText = post.title;
+            if(post.type === 'video') {
+                content.innerHTML = `<video id="active-video" controls autoplay class="w-full h-full"><source src="${post.url}"></video>`;
+            } else {
+                content.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full bg-slate-50 space-y-12 p-12">
+                        <div class="w-32 h-32 bg-blue-50 rounded-[40px] flex items-center justify-center text-blue-500 animate-pulse soft-shadow">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                        </div>
+                        <div class="audio-wave w-full max-w-xl soft-shadow">
+                            <audio id="active-audio" controls autoplay class="w-full"><source src="${post.url}"></audio>
+                        </div>
+                    </div>
+                `;
+            }
+            container.classList.remove('hidden');
+        };
+
+        window.closeCinema = () => {
+            document.getElementById('cinema-container').classList.add('hidden');
+            document.getElementById('cinema-content').innerHTML = '';
+        };
+
+        window.changeFont = (font) => {
+            window.currentFont = font;
+            document.body.style.fontFamily = font + ', sans-serif';
+            if(window.currentTab === 'studio') renderStudio();
+        };
+
+        // Init on load
+        window.onload = () => switchTab('intro');
+    </script>
+</body>
+</html>
